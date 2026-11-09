@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Paths to your Muck game and BepInEx install.
+    Defaults assume a normal Windows Steam install with BepInEx inside the game folder.
+    To use other paths, create a file called local.props next to this file (see local.props.example)
+    or pass them on the command line:  dotnet build -p:MuckDir="D:\Games\Muck"
+  -->
+  <Import Project="local.props" Condition="Exists('local.props')" />
+
+  <PropertyGroup>
+    <MuckDir Condition="'$(MuckDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Muck</MuckDir>
+    <BepInExDir Condition="'$(BepInExDir)' == ''">$(MuckDir)\BepInEx</BepInExDir>
+    <ManagedDir>$(MuckDir)\Muck_Data\Managed</ManagedDir>
+
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>MuckinatorGrind</AssemblyName>
+    <RootNamespace>MuckinatorGrind</RootNamespace>
+    <Version>1.0.0</Version>
+    <Authors>pramodexe</Authors>
+    <Description>Spawns mobs and auto-fights them to farm kills toward the Muckinator achievements in Muck.</Description>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx"><HintPath>$(BepInExDir)\core\BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(BepInExDir)\core\0Harmony.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Assembly-CSharp"><HintPath>$(ManagedDir)\Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(ManagedDir)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(ManagedDir)\UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.IMGUIModule"><HintPath>$(ManagedDir)\UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(ManagedDir)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(ManagedDir)\UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Facepunch.Steamworks.Win64"><HintPath>$(ManagedDir)\Facepunch.Steamworks.Win64.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

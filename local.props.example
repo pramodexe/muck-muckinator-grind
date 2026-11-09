@@ -1,0 +1,10 @@
+<!-- Copy this file to "local.props" and change the paths to match your computer.
+     local.props is ignored by git, so your personal paths are never uploaded. -->
+<Project>
+  <PropertyGroup>
+    <!-- Folder that contains Muck.exe -->
+    <MuckDir>C:\Program Files (x86)\Steam\steamapps\common\Muck</MuckDir>
+    <!-- Folder that contains BepInEx\core (r2modman/Thunderstore users: your profile's BepInEx folder) -->
+    <BepInExDir>C:\Program Files (x86)\Steam\steamapps\common\Muck\BepInEx</BepInExDir>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,9 @@
+{
+  "name": "MuckinatorGrind",
+  "description": "Spawns mobs around you and auto-fights them to farm kills. Tracks your Steam kill count toward your next Muckinator (1-4) achievement.",
+  "version_number": "1.0.0",
+  "website_url": "https://github.com/pramodexe/muckinator-grind",
+  "dependencies": [
+    "BepInEx-BepInExPack_Muck-5.4.1101"
+  ]
+}
