@@ -8,7 +8,9 @@ dotnet build -c Release
 cp bin/Release/netstandard2.0/MuckinatorGrind.dll release/
 
 STAGE=$(mktemp -d)
-cp manifest.json icon.png README.md CHANGELOG.md release/MuckinatorGrind.dll "$STAGE/"
+cp manifest.json icon.png CHANGELOG.md release/MuckinatorGrind.dll "$STAGE/"
+# Thunderstore can't load images by relative path, so point the logo at GitHub in the zip's README.
+sed 's#src="art/logo.png"#src="https://raw.githubusercontent.com/pramodexe/muckinator-grind/main/art/logo.png"#' README.md > "$STAGE/README.md"
 mkdir -p dist
 OUT="$PWD/dist/MuckinatorGrind-$VERSION.zip"
 rm -f "$OUT"

@@ -1,4 +1,4 @@
-<p align="center"><img src="https://raw.githubusercontent.com/pramodexe/muckinator-grind/main/art/logo.png" alt="MuckinatorGrind logo" width="256"></p>
+<p align="center"><img src="art/logo.png" alt="MuckinatorGrind logo" width="256"></p>
 
 # MuckinatorGrind
 
