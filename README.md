@@ -44,7 +44,7 @@ The mod reads your real kill count from Steam and always shows the **next Muckin
 2. **BepInEx 5** (the mod loader). Get it with **one** of these:
    - **Easy way:** [r2modman](https://thunderstore.io/package/ebkr/r2modman/) or the Thunderstore Mod Manager. Pick Muck, and it installs BepInEx for you.
    - **Manual way:** download *BepInExPack for Muck* from [Thunderstore](https://thunderstore.io/c/muck/), or BepInEx 5 (x64) from the [BepInEx releases page](https://github.com/BepInEx/BepInEx/releases).
-3. **Optional:** [God Powers 2](https://thunderstore.io/c/muck/) by Crafterbot. If it is installed, the mod uses its real God Sword model. If not, you still get a strong sword, but it looks like the normal sword.
+3. **Optional:** [God Powers 2](https://thunderstore.io/c/muck/p/Crafterbot/God_Powers_2/) by Crafterbot. If it is installed, the mod uses its real God Sword model. If not, you still get a strong sword, but it looks like the normal sword.
 
 ---
 
