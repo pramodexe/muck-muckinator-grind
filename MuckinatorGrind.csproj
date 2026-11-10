@@ -17,7 +17,7 @@
     <Nullable>disable</Nullable>
     <AssemblyName>MuckinatorGrind</AssemblyName>
     <RootNamespace>MuckinatorGrind</RootNamespace>
-    <Version>1.0.0</Version>
+    <Version>2.0.0</Version>
     <Authors>pramodexe</Authors>
     <Description>Spawns mobs and auto-fights them to farm kills toward the Muckinator achievements in Muck.</Description>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>

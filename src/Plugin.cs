@@ -9,9 +9,9 @@ using HarmonyLib;
 using UnityEngine;
 
 [BepInPlugin("pramodexe.muckinatorgrind", "MuckinatorGrind", Version)]
-public class MuckinatorGrindPlugin : BaseUnityPlugin
+public partial class MuckinatorGrindPlugin : BaseUnityPlugin
 {
-    public const string Version = "1.0.0";
+    public const string Version = "2.0.0";
     public const int MaxMobs = 1000;
     private const int SpawnsPerFrame = 40;
 
@@ -27,11 +27,11 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
     // ───────────────────────────── State ─────────────────────────────
 
     private enum RunState { Stopped, Running, Paused }
-    private enum Tab { Spawn, Combat, Settings }
+    private enum Tab { Spawn, Combat, Logs, Settings }
     private enum HotkeyTarget { None, StartPause, Menu }
     private enum NoticeLevel { Info, Success, Warning, Error }
 
-    private static readonly string[] TabNames = { "Spawn", "Combat", "Settings" };
+    private static readonly string[] TabNames = { "Spawn", "Combat", "Logs", "Settings" };
 
     // Only these mobs can be picked. Names must match MobType.name in the game (compared ignoring case/spaces).
     private static readonly string[] AllowedMobs = { "lil Dave", "Goblin", "Stone Golem" };
@@ -138,6 +138,7 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
     // Spawning is spread over several frames so big waves don't freeze the game.
     private int spawnQueue;
     private int waveSpawned;
+    private int waveFailed;
 
     // God sword / auto-attack
     private float nextSwordCheck;
@@ -190,6 +191,7 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
 
     private static readonly Preset[] Presets =
     {
+        new Preset { Name = "Default",  Hint = "100 mobs, max 150 alive, every 2 s — recommended", Batch = 100, Max = 150, Interval = 2f, Radius = 12f },
         new Preset { Name = "Trickle",  Hint = "5 mobs, slow waves",        Batch = 5,   Max = 10,  Interval = 8f,   Radius = 15f },
         new Preset { Name = "Standard", Hint = "25 mobs, default pacing",   Batch = 25,  Max = 50,  Interval = 5f,   Radius = 12f },
         new Preset { Name = "Horde",    Hint = "60 mobs, fast waves",       Batch = 60,  Max = 120, Interval = 3f,   Radius = 20f },
@@ -205,9 +207,9 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
 
         cfgMob = Config.Bind("Spawning", "Mob", DefaultMob,
             "Mob to spawn: Lil Dave, Goblin or Stone Golem.");
-        cfgBatchSize = Config.Bind("Spawning", "BatchSize", 25);
-        cfgMaxActive = Config.Bind("Spawning", "MaxActiveMobs", 50);
-        cfgSpawnInterval = Config.Bind("Spawning", "SpawnInterval", 5f);
+        cfgBatchSize = Config.Bind("Spawning", "BatchSize", 100);
+        cfgMaxActive = Config.Bind("Spawning", "MaxActiveMobs", 150);
+        cfgSpawnInterval = Config.Bind("Spawning", "SpawnInterval", 2f);
         cfgSpawnRadius = Config.Bind("Spawning", "SpawnRadius", 12f);
 
         cfgUnlimitedHealth = Config.Bind("Player", "UnlimitedHealth", true);
@@ -242,6 +244,8 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
             "Turn the camera toward the nearest mob while the God Sword is attacking.");
 
         LoadFromConfig();
+        RelocateAwake();
+        DiagAwake();
 
         harmony = new Harmony("pramodexe.muckinatorgrind");
         harmony.PatchAll(Assembly.GetExecutingAssembly());
@@ -282,6 +286,8 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
 
     private void Update()
     {
+        DiagTick();
+
         if (capturing != HotkeyTarget.None)
         {
             CaptureHotkey();
@@ -300,6 +306,7 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
         wasInWorld = inWorld;
 
         PruneSpawnedMobs();
+        StatsTick();
 
         if (unlimitedStamina && PlayerStatus.Instance != null)
             PlayerStatus.Instance.stamina = PlayerStatus.Instance.maxStamina;
@@ -367,6 +374,12 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
             nextClickTime = Time.time + clickInterval;
         }
 
+        CheckStuckWave();
+
+        // Clearing loot / moving to a new spot happens between waves; the next wave waits for it.
+        if (UpdateWaveCleanup())
+            return;
+
         if (spawnQueue > 0)
             SpawnStep();
         else if (Time.time >= nextSpawnTime && activeSpawned.Count == 0)
@@ -376,6 +389,7 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
     private void OnDestroy()
     {
         state = RunState.Stopped;
+        StatsEnd();
         SaveSettings();
 
         if (harmony != null)
@@ -383,6 +397,8 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
 
         if (ui != null)
             ui.Dispose();
+
+        DiagShutdown("Mod unloaded (game closing).");
     }
 
     // ═════════════════════════ Run control ═══════════════════════════
@@ -407,9 +423,12 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
         {
             sessionSpawned = 0;
             sessionDefeated = 0;
+            ResetRelocateState();
+            StatsBegin();
         }
 
         bool resumed = state == RunState.Paused;
+        Log("session", (resumed ? "Resumed. " : "Started. ") + StateLine());
         state = RunState.Running;
         nextSpawnTime = Time.time;
         nextClickTime = Time.time;
@@ -443,6 +462,7 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
 
         state = RunState.Paused;
         aimActive = false;
+        Log("session", "Paused. " + StateLine());
         Notify("Paused. Existing mobs stay alive; session stats kept.", NoticeLevel.Warning);
     }
 
@@ -451,9 +471,12 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
         if (state == RunState.Stopped)
             return;
 
+        Log("session", "Stopped (" + message + ") " + StateLine());
         state = RunState.Stopped;
         aimActive = false;
         aimTarget = null;
+        ClearStuckState();
+        StatsEnd();
         Notify(message, level);
     }
 
@@ -486,6 +509,10 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
             state = RunState.Stopped;
             Notify("Left the world — session stopped.", NoticeLevel.Info);
         }
+        Log("world", "Left the world. " + StateLine());
+        StatsEnd();
+        ClearStuckState();
+        ResetRelocateState();
 
         activeSpawned.Clear();
         spawnQueue = 0;
@@ -687,6 +714,7 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
 
     private void Notify(string message, NoticeLevel level)
     {
+        Log("notice", level + ": " + message);
         notice = message;
         noticeLevel = level;
         noticeUntil = Time.unscaledTime + 4f;
@@ -816,6 +844,7 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
             cfgUnlimitedHealth, cfgUnlimitedStamina, cfgAutoClick, cfgClickInterval, cfgLimitEnabled, cfgKillLimit,
             cfgHotkey, cfgMenuKey, cfgCloseOnStart, cfgShowHud, cfgUiScale, cfgTab,
             cfgWindowX, cfgWindowY, cfgWindowWidth, cfgContentHeight, cfgWindowOpacity, cfgGodSword, cfgAutoAim, cfgTracker,
+            cfgMoveEnabled, cfgMoveEveryWaves, cfgClearItems, cfgKeepPowerups,
         })
         {
             entry.BoxedValue = entry.DefaultValue;
@@ -936,6 +965,10 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
 
         spawnQueue = amount;
         waveSpawned = 0;
+        waveFailed = 0;
+        ResetStuckWatch();
+        OnWaveStarted();
+        StatsOnWaveStart();
         SpawnStep();
     }
 
@@ -971,6 +1004,7 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
                 if (MobManager.Instance.mobs.TryGetValue(id, out mob) && mob != null)
                 {
                     activeSpawned[mob.GetInstanceID()] = mob;
+                    StatsOnSpawn(mob.GetInstanceID());
                     totalSpawned++;
                     sessionSpawned++;
                     waveSpawned++;
@@ -978,13 +1012,18 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
             }
             catch (Exception ex)
             {
+                waveFailed++;
                 Logger.LogError("Mob spawn failed: " + ex);
+                if (waveFailed <= 3)
+                    Log("error", "Mob spawn failed: " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
         if (spawnQueue == 0)
         {
             Logger.LogInfo("Spawned wave of " + waveSpawned + " mobs.");
+            Log("wave", "Spawned " + waveSpawned + " " + SelectedMobName() + (waveFailed > 0 ? " (" + waveFailed + " failed)" : "") +
+                        ". Alive now " + activeSpawned.Count + ", session kills " + sessionDefeated + ".");
             nextSpawnTime = Time.time + spawnInterval;
         }
     }
@@ -1010,10 +1049,13 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
         if (hitable == null || hitable.mob == null)
             return;
 
-        if (activeSpawned.Remove(hitable.mob.GetInstanceID()))
+        int mobId = hitable.mob.GetInstanceID();
+        if (activeSpawned.Remove(mobId) || TakeStraggler(mobId))
         {
+            ResetStuckWatch();
             totalDefeated++;
             sessionDefeated++;
+            StatsOnKill(mobId);
 
             if (limitEnabled && sessionDefeated >= killLimit && state == RunState.Running)
                 Stop("Kill target of " + killLimit + " reached.", NoticeLevel.Success);
@@ -1159,6 +1201,17 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
         return sword;
     }
 
+    private InventoryCell FindEmptyCell(InventoryCell except)
+    {
+        InventoryUI inv = InventoryUI.Instance;
+        if (inv == null || inv.cells == null)
+            return null;
+        foreach (InventoryCell cell in inv.cells)
+            if (cell != null && cell != except && cell.currentItem == null && cell.cellType == InventoryCell.CellType.Inventory)
+                return cell;
+        return null;
+    }
+
     /// <summary>Makes sure hotbar slot 1 holds a God Sword and that slot is selected.</summary>
     private bool EnsureGodSwordEquipped()
     {
@@ -1193,10 +1246,23 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
 
             if (slot1.currentItem != null)
             {
+                // Move whatever was in slot 1 into a free inventory slot. Only drop it if the inventory is full
+                // (dropped items can be cleared by "Clear dropped items").
                 InventoryItem old = slot1.currentItem;
-                if (InventoryUI.Instance != null)
-                    InventoryUI.Instance.DropItemIntoWorld(old);
-                Notify("Dropped " + old.name + " (x" + old.amount + ") to make room for the God Sword.", NoticeLevel.Warning);
+                InventoryCell free = FindEmptyCell(slot1);
+                if (free != null)
+                {
+                    free.currentItem = old;
+                    free.UpdateCell();
+                    Notify("Moved " + old.name + " out of slot 1 to make room for the God Sword.", NoticeLevel.Info);
+                }
+                else
+                {
+                    if (InventoryUI.Instance != null)
+                        InventoryUI.Instance.DropItemIntoWorld(old);
+                    Notify("Inventory full: dropped " + old.name + " (x" + old.amount + ") to make room for the God Sword.",
+                        NoticeLevel.Warning);
+                }
             }
 
             slot1.currentItem = sword;
@@ -1227,7 +1293,7 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
 
         foreach (Mob mob in MobManager.Instance.mobs.Values)
         {
-            if (mob == null || !mob.gameObject.activeInHierarchy)
+            if (mob == null || !mob.gameObject.activeInHierarchy || AimIgnored(mob))
                 continue;
 
             float sq = (mob.transform.position - from).sqrMagnitude;
@@ -1259,6 +1325,13 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
 
         Vector3 targetPos = aimTarget.transform.position + Vector3.up * 1.2f;
         Vector3 dir = targetPos - eye;
+
+        // Don't hold the camera on a mob the sword can never reach (stuck in terrain, fell under the map...).
+        if (!AimTargetStillWorthIt(aimTarget, dir.magnitude, reach))
+        {
+            aimTarget = null;
+            return;
+        }
 
         if (autoAimEnabled && dir.sqrMagnitude > 0.01f)
         {
@@ -1427,8 +1500,9 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
             contentScroll = GUILayout.BeginScrollView(contentScroll, GUILayout.Height(ContentHeight));
             switch (activeTab)
             {
-                case Tab.Spawn: DrawMobsTab(); DrawSpawningTab(); DrawKillTargetSection(); DrawStatsSection(); break;
+                case Tab.Spawn: DrawMobsTab(); DrawSpawningTab(); DrawMoveSection(); DrawKillTargetSection(); DrawStatsSection(); break;
                 case Tab.Combat: DrawCombatTab(); break;
+                case Tab.Logs: DrawLogsTab(); break;
                 case Tab.Settings: DrawSettingsTab(); break;
             }
             GUILayout.EndScrollView();
@@ -1717,9 +1791,6 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
                 Notify("Load into a world first.", NoticeLevel.Error);
         }
         GUILayout.EndHorizontal();
-        GUILayout.Label(GodPowersAvailable()
-            ? "Using the God Sword from Muck God Powers."
-            : "Muck God Powers not found — a stat-boosted sword is used instead.", ui.Hint);
         GUI.enabled = true;
 
         Section("AUTO-CLICK");
@@ -1804,6 +1875,8 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
             "Lower values make the menu see-through so you can watch the game behind it.",
             windowOpacity * 100f, 30f, 100f, 5f, "0", "%") / 100f;
         GUILayout.Label("Drag the dots in the menu's bottom-right corner to resize it.", ui.Hint);
+
+        DrawDiagnosticsSection();
 
         Section("DATA");
         GUILayout.BeginHorizontal();
@@ -1895,6 +1968,10 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
 
             if (limitEnabled)
                 ProgressBar(Mathf.Clamp01((float)sessionDefeated / Mathf.Max(1, killLimit)), null, 6);
+
+            string rating = HudRatingText();
+            if (rating != null)
+                HudLine("Rating", rating);
 
             GUILayout.Space(2);
             GUILayout.Label(WaveStatus(), ui.HintSmall);
@@ -2158,6 +2235,13 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
         private static readonly Color Green = Hex("#3FB950");
         private static readonly Color Amber = Hex("#D29922");
         private static readonly Color Red = Hex("#F85149");
+        private static readonly Color Blue = Hex("#58A6FF");
+
+        public Color GreenColor { get { return Green; } }
+        public Color AmberColor { get { return Amber; } }
+        public Color RedColor { get { return Red; } }
+        public Color BlueColor { get { return Blue; } }
+        public Color MutedColor { get { return MutedText; } }
 
         private readonly List<Texture2D> textures = new List<Texture2D>();
 
@@ -2170,7 +2254,10 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
         public GUIStyle Tab, TabActive, MobButton, MobSelected, SwitchOn, SwitchOff;
         public GUIStyle PillGreen, PillAmber, PillGray, BannerError, BannerWarning;
         public GUIStyle TextInput, InputNumber, SliderTrack, Thumb;
+        public GUIStyle CardSelected, GradeBig, GradeSmall, AxisRight, AxisCenter;
         public Texture2D BorderTex, AccentTex, TrackTex, TrackFillDisabledTex, GreenTex;
+        public Texture2D BlueTex, GridTex, ChartBgTex, AccentFillTex;
+        public GUIStyle SmallWrap, BoldWrap;
 
         public void EnsureBuilt()
         {
@@ -2202,6 +2289,10 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
             TrackTex = Solid(Hex("#2A2E37"));
             TrackFillDisabledTex = Solid(Hex("#555B66"));
             GreenTex = Solid(Green);
+            BlueTex = Solid(Blue);
+            GridTex = Solid(Hex("#22262E"));
+            ChartBgTex = Solid(InputBg);
+            AccentFillTex = Solid(new Color(AccentC.r, AccentC.g, AccentC.b, 0.18f));
 
             // Scrollbars
             Skin.verticalScrollbar.normal.background = Solid(Bg);
@@ -2227,6 +2318,7 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
             SetAll(Window, Bordered(Bg, Border), Text);
 
             Card = Box(Surface, Border, new RectOffset(10, 10, 8, 8), new RectOffset(0, 0, 3, 3));
+            CardSelected = Box(Hex("#2A2119"), AccentDark, new RectOffset(10, 10, 8, 8), new RectOffset(0, 0, 3, 3));
             Hud = Box(new Color(Bg.r, Bg.g, Bg.b, 0.88f), Border, new RectOffset(10, 10, 8, 8), new RectOffset(0, 0, 0, 0));
 
             Label = TextStyle(12, Text);
@@ -2248,6 +2340,12 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
             ProgressLabel = TextStyle(11, Color.white, FontStyle.Bold); ProgressLabel.alignment = TextAnchor.MiddleCenter;
             EmptyTitle = TextStyle(14, Text, FontStyle.Bold); EmptyTitle.alignment = TextAnchor.MiddleCenter;
             EmptyBody = TextStyle(11, MutedText); EmptyBody.alignment = TextAnchor.MiddleCenter; EmptyBody.wordWrap = true;
+            GradeBig = TextStyle(38, Text, FontStyle.Bold); GradeBig.alignment = TextAnchor.MiddleCenter;
+            GradeSmall = TextStyle(20, Text, FontStyle.Bold); GradeSmall.alignment = TextAnchor.MiddleCenter;
+            SmallWrap = TextStyle(10, MutedText); SmallWrap.wordWrap = true;
+            BoldWrap = TextStyle(12, Text, FontStyle.Bold); BoldWrap.wordWrap = true;
+            AxisRight = TextStyle(9, MutedText); AxisRight.alignment = TextAnchor.MiddleRight;
+            AxisCenter = TextStyle(9, MutedText); AxisCenter.alignment = TextAnchor.MiddleCenter;
 
             KeyCap = TextStyle(12, Text, FontStyle.Bold);
             KeyCap.normal.background = Bordered(InputBg, Hex("#454B57"));
@@ -2401,7 +2499,7 @@ public class MuckinatorGrindPlugin : BaseUnityPlugin
             SetTextColor(s, text);
         }
 
-        private static void SetTextColor(GUIStyle s, Color c)
+        public static void SetTextColor(GUIStyle s, Color c)
         {
             s.normal.textColor = c; s.onNormal.textColor = c;
             s.hover.textColor = c; s.onHover.textColor = c;
